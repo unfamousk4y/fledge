@@ -1,0 +1,32 @@
+[project]
+name = "fledge"
+version = "0.1.0"
+description = "Fledge backend: crawler, change detector, alerts, API."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8", "mypy>=1.13"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fledge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F: errors and undefined names; I: import order; B: likely bugs;
+# UP: modern syntax; SIM: simplifications.
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+strict = true
+packages = ["fledge", "tests"]
