@@ -30,6 +30,18 @@ Settled choices for Fledge and why we made them. Add a dated entry when a decisi
 | Fit Radar | Runs in the browser (transformers.js). The resume is never uploaded | No sensitive data on our server |
 | Name | **Fledge**. No "worm" in the name (engineers read it as malware). Check name and handle availability before launch | A fledgling is a young bird leaving the nest, like a student going after a first job |
 
+## 2026-11-16: Role scope and Greenhouse crawler
+
+| Area | Decision | Reason |
+|---|---|---|
+| Role scope | Early-career roles in software, data, ML/AI, security, infra/IT, hardware. Not PM, design, sales | Clear technical roles that are classifiable accurately in v1 |
+| Degree level | Include PhD/Master's-only internships, tagged with a badge users can filter on | Undergrads aren't spammed and no data is thrown away |
+| Greenhouse API | Public `boards-api.greenhouse.io/v1/boards/{token}/jobs`, no auth. Docs (checked 2026-11-16) state no rate limits, caching rules or third-party terms | Documented public data |
+| Polite polling | Conditional requests with `ETag` / `If-None-Match` (verified: unchanged board → `304`, no body). Poll the list *without* `content`; fetch a job's full description only when it first appears | The full list can be 1.6 MB per poll; a 304 costs almost nothing |
+| Detector input | Pass **every** posting ID on the board to the detector, not just early-career ones. Filter only when alerting or displaying | Otherwise a company's last intern role closing makes the filtered list empty, which reads as "unknown" forever |
+| 304 handling | A `304` is a successful check whose IDs equal the last successful check's | Time keeps passing, so a missing posting can still be confirmed closed |
+| Fixtures | Tests use synthetic JSON shaped like the real API, not copies of companies' postings | No third-party content republished in a public repo |
+
 ## Open items
 - [x] Install Python 3.13 and Docker Desktop (2026-11-15). Docker Desktop must be opened once to start its engine.
 - [ ] Before writing each crawler, check that ATS's job-board API terms.

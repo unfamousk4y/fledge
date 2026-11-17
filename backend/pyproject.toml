@@ -3,7 +3,7 @@ name = "fledge"
 version = "0.1.0"
 description = "Fledge backend: crawler, change detector, alerts, API."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["httpx>=0.28"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8", "mypy>=1.13"]
