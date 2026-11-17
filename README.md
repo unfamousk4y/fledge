@@ -4,7 +4,14 @@
 
 Fledge watches tech companies' public hiring feeds and tells you the moment an internship or new-grad role drops. It also estimates how long the role is likely to stay open and helps you reach someone at the company in one click.
 
-**Status:** early build. The posting change detector (closed-rule state machine) is done and tested; the crawler is next. See [DECISIONS.md](DECISIONS.md).
+**Status:** early build. A Greenhouse crawler, change detector and role classifier work end to end for one company at a time, with state kept in memory. The database is next. See [DECISIONS.md](DECISIONS.md).
+
+Try it (prints new, missing, closed and reopened postings, plus which ones would alert):
+
+```bash
+cd backend
+.venv/Scripts/python -m fledge.crawl figma --interval 300
+```
 
 ## Development
 Requires Python 3.12+.
