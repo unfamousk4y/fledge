@@ -11,6 +11,24 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    # A throwaway Postgres for the database tests. The password only exists
+    # inside this CI run, so it isn't a secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: fledge
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: fledge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fledge -d fledge_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://fledge:ci-only@localhost:5432/fledge_test
     defaults:
       run:
         working-directory: backend

@@ -42,8 +42,23 @@ Settled choices for Fledge and why we made them. Add a dated entry when a decisi
 | 304 handling | A `304` is a successful check whose IDs equal the last successful check's | Time keeps passing, so a missing posting can still be confirmed closed |
 | Fixtures | Tests use synthetic JSON shaped like the real API, not copies of companies' postings | No third-party content republished in a public repo |
 
+## 2026-11-17: Persistence
+
+| Area | Decision | Reason |
+|---|---|---|
+| DB access | SQLAlchemy 2.x **Core** (not the ORM) + Alembic migrations | SQL stays visible and explainable; migrations are versioned |
+| Driver | psycopg 3 (`psycopg[binary]`; no compiling on Windows) | Standard driver; works sync and async; speed isn't the bottleneck |
+| Dependencies | Approved: `sqlalchemy`, `alembic`, `psycopg[binary]` | Nothing installed already covers DB access |
+| Detector state | Stored as columns on `postings` (`status`, `missing_since`); history in `posting_events` | Loading state is one query; events feed the Closing Clock |
+| Crash safety | One transaction per check: run record, postings, events and states commit together or not at all | No half-saved state or duplicate events; the next check redoes the work |
+| Downtime | After a restart, postings that appeared while the worker was down **do** alert, with honest latency | Better late than missed; the latency metric stays truthful |
+| Retention | Check records (`crawl_runs`) kept 30 days; postings and events kept forever | Recent success-rate metric without ~20M rows/year; the Clock needs full history |
+| Test database | Real Postgres in Docker (docker-compose locally, service container in CI). No SQLite | Tests run against the same engine as production |
+| Scope of this piece | DB + one-board crawler saving/loading state, with a restart test. Multi-board worker is the next piece | One reviewable step |
+
 ## Open items
 - [x] Install Python 3.13 and Docker Desktop (2026-11-15). Docker Desktop must be opened once to start its engine.
+- [x] Enable the Windows "Virtual Machine Platform" feature so Docker's engine can start (done 2026-11-17).
 - [ ] Before writing each crawler, check that ATS's job-board API terms.
 - [ ] Check the licenses of the GitHub internship lists before any backfill.
 - [ ] Pick an email provider after checking current free-tier limits.

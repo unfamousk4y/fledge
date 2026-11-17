@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from fledge.classify import DegreeTag
-from fledge.crawl import BoardCrawler, CheckReport
+from fledge.crawler import BoardCrawler, CheckReport
 from fledge.detector import EventKind, Status
 
 T0 = datetime(2026, 8, 3, 18, 0, tzinfo=UTC)
