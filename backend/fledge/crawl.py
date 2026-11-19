@@ -136,8 +136,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--interval must be at least 60 seconds (be polite to company servers)")
     engine = create_engine(config.database_url())
     try:
-        with contextlib.suppress(KeyboardInterrupt):  # Ctrl+C exits quietly
+        # Ctrl+C exits quietly; the lock keeps this from running alongside the worker.
+        with contextlib.suppress(KeyboardInterrupt), db.worker_lock(engine):
             asyncio.run(run(args.board, args.interval, args.duration, engine))
+    except db.WorkerAlreadyRunning as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     finally:
         engine.dispose()
     return 0

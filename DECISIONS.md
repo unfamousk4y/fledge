@@ -56,6 +56,22 @@ Settled choices for Fledge and why we made them. Add a dated entry when a decisi
 | Test database | Real Postgres in Docker (docker-compose locally, service container in CI). No SQLite | Tests run against the same engine as production |
 | Scope of this piece | DB + one-board crawler saving/loading state, with a restart test. Multi-board worker is the next piece | One reviewable step |
 
+## 2026-11-18: Multi-board worker
+
+| Area | Decision | Reason |
+|---|---|---|
+| Company list | `companies.csv` in the repo (name, ATS, board token, priority), loaded into `boards` by a `sync` command | Reviewable in PRs; board tokens are public |
+| Scheduling | `next_check_at` per board in Postgres; the loop checks boards that are due | Survives restarts, can be queried, supports tiers |
+| Poll tiers (pre-users) | 30 min by default; ~25 `priority` companies every 5 min. Watches will also set 5 min later | ~17k requests/day, mostly cheap 304s; speed where it matters |
+| Concurrency | One asyncio process, at most ~10 checks in flight (semaphore) | Simple, fits a free VM, polite to Greenhouse |
+| Jitter | Random offset on each board's schedule | No burst of 200 requests after a restart |
+| Sync DB in async worker | Saves run in a thread (`asyncio.to_thread`); `db.py` stays sync | Fetches keep going during saves; no churn in tested code |
+| Dead boards | 404 for 24 h straight → `broken`, checked daily, shown in a status command; recovers by itself | No wasted requests; history is kept |
+| Failures / 429 | Per-board exponential backoff (2× per consecutive failure, max 1 h), honor `Retry-After`, reset on success | Ignoring "slow down" gets crawlers blocked |
+| Bugs in one board | Caught per board: logged with traceback, recorded as a failed run, backed off; other boards continue | One bad company can't stop alerts for everyone |
+| Single worker | Postgres advisory lock; a second worker exits with a message | Two workers could send every alert twice |
+| Scope of this piece | Worker, CSV + `sync`, scheduling, failure handling, lock, status command, **48** verified Greenhouse companies (all live boards from 50 probed on 2026-11-18; the 24 with current early-career roles are `priority`). `fledge.crawl` stays as a one-board debug tool. Growing to 200 is a separate step | One reviewable step |
+
 ## Open items
 - [x] Install Python 3.13 and Docker Desktop (2026-11-15). Docker Desktop must be opened once to start its engine.
 - [x] Enable the Windows "Virtual Machine Platform" feature so Docker's engine can start (done 2026-11-17).

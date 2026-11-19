@@ -9,7 +9,8 @@ parameter (dependency injection) so tests can hand it a fake one.
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from enum import Enum
 from typing import Any
 
@@ -107,6 +108,26 @@ class FetchResult:
     etag: str | None = None
     skipped: int = 0
     error: str | None = None
+    retry_after: timedelta | None = None  # the server asked us to wait (429/503)
+
+
+def parse_retry_after(value: str | None, now: datetime) -> timedelta | None:
+    """Read a Retry-After header: either seconds ("120") or an HTTP date.
+
+    Returns None for a missing or unreadable value, and never a negative wait.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return timedelta(seconds=int(value))
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:  # HTTP dates are GMT by definition
+        when = when.replace(tzinfo=UTC)
+    return max(when - now, timedelta(0))
 
 
 async def fetch_board(
@@ -128,7 +149,11 @@ async def fetch_board(
     if response.status_code == 404:
         return FetchResult(FetchStatus.NOT_FOUND, error="board not found (404)")
     if response.status_code != 200:
-        return FetchResult(FetchStatus.FAILED, error=f"HTTP {response.status_code}")
+        return FetchResult(
+            FetchStatus.FAILED,
+            error=f"HTTP {response.status_code}",
+            retry_after=parse_retry_after(response.headers.get("retry-after"), datetime.now(UTC)),
+        )
 
     try:
         parsed = parse_jobs(response.content, board)

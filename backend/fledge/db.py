@@ -9,15 +9,18 @@ The database is the source of truth. One check is saved in ONE transaction
 none of it, never half.
 """
 
-from collections.abc import Iterable, Mapping
+import contextlib
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime, timedelta
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     Connection,
     DateTime,
+    Engine,
     ForeignKey,
     Identity,
     Index,
@@ -27,9 +30,12 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     delete,
+    false,
     func,
     insert,
     select,
+    text,
+    true,
     update,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -75,7 +81,17 @@ boards = Table(
     # after a restart we need this list to interpret the next 304.
     Column("last_seen_ids", ARRAY(Text)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # Worker scheduling (migration 0002). Display name and priority come from
+    # companies.csv; boards added by the one-board debug CLI have no name.
+    Column("name", Text),
+    Column("priority", Boolean, nullable=False, server_default=false()),
+    Column("active", Boolean, nullable=False, server_default=true()),  # false = removed from CSV
+    _tz("next_check_at"),  # NULL = never scheduled
+    Column("consecutive_failures", Integer, nullable=False, server_default=text("0")),
+    # Start of the current unbroken run of 404s. "Broken" = this is > 24 h ago.
+    _tz("not_found_since"),
     UniqueConstraint("source", "token"),
+    Index(None, "next_check_at"),
 )
 
 postings = Table(
@@ -126,7 +142,43 @@ crawl_runs = Table(
         _one_of("status", (s.value for s in greenhouse.FetchStatus)), name="status_valid"
     ),
     Index(None, "at"),  # the 30-day cleanup deletes by time
+    Index(None, "board_id", "at"),  # "latest run per board" (worker status)
 )
+
+
+# --- Single-worker lock --------------------------------------------------------
+
+# Any fixed number works; it just has to be the same in every Fledge process.
+WORKER_LOCK_KEY = 0x464C4544  # "FLED" in ASCII
+
+
+class WorkerAlreadyRunning(RuntimeError):
+    pass
+
+
+@contextlib.contextmanager
+def worker_lock(engine: Engine) -> Iterator[None]:
+    """Hold the single-worker lock for the duration of the `with` block.
+
+    pg_try_advisory_lock is held by a database *session*, so we keep one
+    connection open the whole time. If the process dies, Postgres closes the
+    connection and releases the lock by itself.
+    """
+    conn = engine.connect()
+    try:
+        got = conn.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": WORKER_LOCK_KEY})
+        conn.commit()
+        if not got:
+            raise WorkerAlreadyRunning(
+                "another Fledge worker (or fledge.crawl) is already running on this database"
+            )
+        try:
+            yield
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": WORKER_LOCK_KEY})
+            conn.commit()
+    finally:
+        conn.close()
 
 
 # --- Reading ------------------------------------------------------------------

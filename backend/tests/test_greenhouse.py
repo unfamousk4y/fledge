@@ -19,6 +19,7 @@ from fledge.sources.greenhouse import (
     ParseError,
     fetch_board,
     parse_jobs,
+    parse_retry_after,
 )
 
 
@@ -187,3 +188,33 @@ def test_network_errors_are_failures_not_crashes(exc: httpx.HTTPError) -> None:
     result, _ = fetch(boom)
     assert result.status is FetchStatus.FAILED
     assert result.error is not None and type(exc).__name__ in result.error
+
+
+# --- Retry-After --------------------------------------------------------------
+
+
+def test_429_reports_how_long_the_server_asked_us_to_wait() -> None:
+    result, _ = fetch(lambda r: httpx.Response(429, headers={"Retry-After": "120"}))
+    assert result.status is FetchStatus.FAILED
+    assert result.retry_after == timedelta(seconds=120)
+
+
+def test_failure_without_retry_after_has_none() -> None:
+    result, _ = fetch(lambda r: httpx.Response(503))
+    assert result.retry_after is None
+
+
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("90", timedelta(seconds=90)),
+        ("Mon, 03 Aug 2026 18:02:00 GMT", timedelta(minutes=2)),  # an HTTP date
+        ("Mon, 03 Aug 2026 17:00:00 GMT", timedelta(0)),  # in the past: don't wait
+        ("soon", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_parse_retry_after(header: str | None, expected: timedelta | None) -> None:
+    now = datetime(2026, 8, 3, 18, 0, tzinfo=UTC)
+    assert parse_retry_after(header, now) == expected
