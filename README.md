@@ -4,7 +4,7 @@
 
 Fledge watches tech companies' public hiring feeds and tells you the moment an internship or new-grad role drops. It also estimates how long the role is likely to stay open and helps you reach someone at the company in one click.
 
-**Status:** early build. A worker watches 48 companies' Greenhouse boards (priority companies every 5 minutes, the rest every 30), detects new, missing, closed and reopened postings, and saves everything to Postgres, so a restart picks up where it left off. Email alerts are next. See [DECISIONS.md](DECISIONS.md).
+**Status:** early build. A worker watches 48 companies' Greenhouse boards (priority companies every 5 minutes, the rest every 30), detects new, missing, closed and reopened postings, saves everything to Postgres, and emails subscribers about new early-career roles within seconds (bursts are grouped into one email). Sign-up and a web app are next. See [DECISIONS.md](DECISIONS.md).
 
 ## Development
 Requires Python 3.12+ and Docker.
@@ -12,6 +12,7 @@ Requires Python 3.12+ and Docker.
 ```bash
 cp .env.example .env            # then replace change-me with your own password
 docker compose up -d            # Postgres 18 on localhost:5432 (also creates fledge_test)
+                                # + Mailpit, a fake inbox for emails: http://localhost:8025
 
 cd backend
 python -m venv .venv
@@ -30,7 +31,18 @@ Try it. The company list is [backend/data/companies.csv](backend/data/companies.
 .venv/Scripts/python -m fledge.worker status   # one line per company: last check, failures, next check
 ```
 
-`run` prints new, missing, closed and reopened postings, plus an `ALERT` line for each new early-career role. Stop it and start it again: it continues from the database. Only one worker can run per database. For debugging a single board: `python -m fledge.crawl figma --interval 300`.
+Email alerts (until sign-up exists, subscribers are managed by command; add only people who asked):
+
+```bash
+.venv/Scripts/python -m fledge.subscribers add you@example.com [--companies stripe,figma]
+.venv/Scripts/python -m fledge.subscribers list
+.venv/Scripts/python -m fledge.subscribers remove you@example.com
+.venv/Scripts/python -m fledge.alerts test you@example.com   # one sample email
+```
+
+By default emails go to Mailpit, not real inboxes. See `.env.example` for real sending.
+
+`run` prints new, missing, closed and reopened postings, plus an `ALERT` line for each new early-career role, and emails matching subscribers. Stop it and start it again: it continues from the database. Only one worker can run per database. For debugging a single board: `python -m fledge.crawl figma --interval 300`.
 
 CI runs the same checks, against a throwaway Postgres, on every push and pull request.
 

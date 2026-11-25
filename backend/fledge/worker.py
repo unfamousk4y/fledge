@@ -11,6 +11,8 @@ How one loop iteration works (`Worker.run_due_once`):
        schedule + health. Database work runs in a thread so fetches keep going.
     4. an unexpected error in one board is logged, recorded as a failed run and
        backed off; the other boards are unaffected
+    5. new roles that match a subscriber are queued in the outbox in that same
+       transaction; the email sender (alerts.Sender) runs alongside and delivers them
 
 Only one worker may run against a database at a time (a Postgres advisory
 lock), or two workers could both report the same new posting.
@@ -28,12 +30,24 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import httpx
-from sqlalchemy import Connection, Engine, create_engine, insert, select, text, update
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    Engine,
+    Exists,
+    create_engine,
+    exists,
+    insert,
+    select,
+    text,
+    update,
+)
 
-from fledge import companies, config, db, schedule
+from fledge import alerts, companies, config, db, schedule
 from fledge.crawl import format_report
 from fledge.crawler import BoardCrawler, CheckReport, make_client
 from fledge.db import WorkerAlreadyRunning, worker_lock
+from fledge.mailer import mailer_from_settings, sender_address
 from fledge.schedule import BoardHealth
 from fledge.sources.greenhouse import FetchStatus
 
@@ -53,10 +67,16 @@ class DueBoard:
     health: BoardHealth
 
 
+def _watched(board_id_column: ColumnElement[int]) -> Exists:
+    """True if any subscriber chose this board: watched boards get the 5-min tier."""
+    sb = db.subscriber_boards
+    return exists().where(sb.c.board_id == board_id_column)
+
+
 def due_boards(conn: Connection, now: datetime) -> list[DueBoard]:
     b = db.boards
     rows = conn.execute(
-        select(b)
+        select(b, _watched(b.c.id).label("watched"))
         .where(b.c.active, b.c.next_check_at <= now)
         .order_by(b.c.next_check_at)  # most overdue first
     )
@@ -65,7 +85,7 @@ def due_boards(conn: Connection, now: datetime) -> list[DueBoard]:
             r.id,
             r.token,
             r.name or r.token,
-            r.priority,
+            r.priority or r.watched,
             BoardHealth(r.consecutive_failures, r.not_found_since),
         )
         for r in rows
@@ -114,6 +134,7 @@ class Worker:
         rng: random.Random | None = None,
         out: Callable[[str], None] = print,
         max_in_flight: int = MAX_IN_FLIGHT,
+        on_alerts_queued: Callable[[], None] | None = None,
     ) -> None:
         self.engine = engine
         self.client = client
@@ -124,6 +145,7 @@ class Worker:
         # In-memory crawler per board, so each check doesn't reload every posting.
         # Dropped whenever memory might be ahead of the database.
         self.crawlers: dict[int, BoardCrawler] = {}
+        self.on_alerts_queued = on_alerts_queued  # wakes the email sender
 
     def _db[T](self, fn: Callable[[Connection], T]) -> T:
         """Run fn inside one transaction (commit on success, roll back on error)."""
@@ -155,13 +177,17 @@ class Worker:
             board.priority, health, now, self.rng, report.fetch.retry_after
         )
 
-        def save(conn: Connection) -> None:
+        def save(conn: Connection) -> int:
             db.save_check(conn, board.id, crawler, report)
             _set_schedule(conn, board.id, health, next_at)
+            # Same transaction: a check and its alerts commit together or not at all.
+            return alerts.queue_alerts(conn, board.id, report.drops, now)
 
         # If this raises, _check drops the cached crawler and records a crash.
-        await asyncio.to_thread(self._db, save)
+        queued = await asyncio.to_thread(self._db, save)
         self.crawlers[board.id] = crawler
+        if queued and self.on_alerts_queued:
+            self.on_alerts_queued()  # first alert goes out right away, not at the next poll
 
         for line in format_report(report, crawler):
             self.out(f"[{board.name}] {line.strip()}")
@@ -199,30 +225,37 @@ class Worker:
 
 async def run_forever(engine: Engine, out: Callable[[str], None] = print) -> None:
     with worker_lock(engine):
-        async with make_client() as client:
-            worker = Worker(engine, client, out=out)
-            last_prune: datetime | None = None
-            while True:
-                now = worker.clock()
-                if last_prune is None or now - last_prune >= PRUNE_EVERY:
-                    removed = await asyncio.to_thread(
-                        worker._db, partial(db.delete_old_runs, now=now)
-                    )
-                    if removed:
-                        out(f"pruned {removed} check record(s) older than 30 days")
-                    last_prune = now
-                await worker.run_due_once()
-                wait = await asyncio.to_thread(
-                    worker._db, lambda c: seconds_until_next_due(c, worker.clock())
-                )
-                await asyncio.sleep(wait)
+        sender = alerts.Sender(engine, mailer_from_settings(), sender_address(), out=out)
+        await asyncio.gather(_crawl_forever(engine, out, sender.wake.set), sender.run_forever())
+
+
+async def _crawl_forever(
+    engine: Engine, out: Callable[[str], None], on_alerts_queued: Callable[[], None]
+) -> None:
+    async with make_client() as client:
+        worker = Worker(engine, client, out=out, on_alerts_queued=on_alerts_queued)
+        last_prune: datetime | None = None
+        while True:
+            now = worker.clock()
+            if last_prune is None or now - last_prune >= PRUNE_EVERY:
+                removed = await asyncio.to_thread(worker._db, partial(db.delete_old_runs, now=now))
+                if removed:
+                    out(f"pruned {removed} check record(s) older than 30 days")
+                last_prune = now
+            await worker.run_due_once()
+            wait = await asyncio.to_thread(
+                worker._db, lambda c: seconds_until_next_due(c, worker.clock())
+            )
+            await asyncio.sleep(wait)
 
 
 # --- status -------------------------------------------------------------------
 
 _STATUS_SQL = text(
     """
-    SELECT b.name, b.token, b.priority, b.active, b.next_check_at,
+    SELECT b.name, b.token, b.active, b.next_check_at,
+           b.priority OR EXISTS (SELECT 1 FROM subscriber_boards sb
+                                  WHERE sb.board_id = b.id) AS priority,
            b.consecutive_failures, b.not_found_since,
            r.at AS last_at, r.status AS last_status, r.error AS last_error,
            (SELECT count(*) FROM postings p
@@ -233,7 +266,7 @@ _STATUS_SQL = text(
         WHERE board_id = b.id ORDER BY at DESC LIMIT 1
     ) r ON true
     WHERE b.name IS NOT NULL
-    ORDER BY b.active DESC, b.priority DESC, b.name
+    ORDER BY b.active DESC, priority DESC, b.name
     """
 )
 
@@ -263,6 +296,11 @@ def status_lines(conn: Connection, now: datetime) -> list[str]:
             f"{r.consecutive_failures:>5} {ago(r.next_check_at):>9} {r.open_postings:>5}  "
             + "; ".join(notes)
         )
+    counts = alerts.outbox_counts(conn)
+    lines.append(
+        f"emails: {counts.get('pending', 0)} pending, {counts.get('sent', 0)} sent, "
+        f"{counts.get('failed', 0)} failed"
+    )
     return lines
 
 

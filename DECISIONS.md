@@ -72,11 +72,28 @@ Settled choices for Fledge and why we made them. Add a dated entry when a decisi
 | Single worker | Postgres advisory lock; a second worker exits with a message | Two workers could send every alert twice |
 | Scope of this piece | Worker, CSV + `sync`, scheduling, failure handling, lock, status command, **48** verified Greenhouse companies (all live boards from 50 probed on 2026-11-18; the 24 with current early-career roles are `priority`). `fledge.crawl` stays as a one-board debug tool. Growing to 200 is a separate step | One reviewable step |
 
+## 2026-11-24: Email alerts
+
+| Area | Decision | Reason |
+|---|---|---|
+| Sending (pre-launch) | A dedicated Gmail account for Fledge, over SMTP (`smtp.gmail.com:587`, STARTTLS) with an app password in `.env`. Founder creates the account and app password. At launch, move to Resend or Brevo with our own domain | Sending to other people through Resend or Brevo needs an authenticated domain (checked 2026-11-24); Gmail signs its own mail, costs $0, and ~500/day covers the beta. Python's `smtplib` needs no new dependency |
+| Recipients (this piece) | `subscribers` table managed by command line; only people who asked for alerts. Sign-in fills the same table later | Builds the hard part (delivery) first |
+| Subscriber choices | All companies or a chosen list (a list also counts as a "watch" for the 5-min tier); hide PhD/Master's-only roles (default on); include unclear locations (default on) | Matches the role scope and degree tagging decisions |
+| Delivery guarantee | **At least once.** An `outbox` row (unique per subscriber + posting) is written in the same transaction as the check; a sender loop sends and marks rows sent. A crash right after the mail server accepts can repeat one email | "Exactly once" is impossible over SMTP; losing alerts is worse than a rare duplicate |
+| Burst grouping | Per subscriber: no email in the last 10 min → send now; otherwise hold and send one combined email 10 min after their last one | First alert is instant; bursts don't spam |
+| Send failures | Retry after 1, 5, 15, 60 min, then hourly; after 24 h mark failed and show in `worker status`. Authentication errors stop sending with one clear error | Recovers from blips without piling up forever |
+| Reopened postings | No alert yet; repost detection and labels come in weeks 6–7 | Raw reopens would double-alert flaky postings |
+| Unsubscribe | Each email says "Reply STOP to unsubscribe"; founder removes them by command. **Launch blocker:** a real one-click unsubscribe link once the web API exists | No web server yet |
+| Email format | Plain text + simple HTML in one message; no tracking pixels or link tracking | Readable everywhere; respects privacy |
+| Testing | Mailpit (fake mail server with a web inbox) in docker compose for development and tests; one live Gmail test to the founder's own address | Proves real, valid emails without spamming anyone |
+
 ## Open items
 - [x] Install Python 3.13 and Docker Desktop (2026-11-15). Docker Desktop must be opened once to start its engine.
 - [x] Enable the Windows "Virtual Machine Platform" feature so Docker's engine can start (done 2026-11-17).
 - [ ] Before writing each crawler, check that ATS's job-board API terms.
 - [ ] Check the licenses of the GitHub internship lists before any backfill.
-- [ ] Pick an email provider after checking current free-tier limits.
+- [x] Pick an email provider after checking current free-tier limits (2026-11-24: Gmail SMTP for beta, Resend/Brevo + domain at launch).
+- [ ] Create the dedicated Fledge Gmail account, turn on 2-Step Verification, create an app password and put it in `.env` (founder).
+- [ ] **Launch blocker:** one-click unsubscribe link in every email (needs the web API).
 - [ ] Create the Oracle Cloud account (founder; needs a card for identity verification).
 - [ ] Domain decision at launch prep.

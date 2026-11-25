@@ -9,6 +9,7 @@ Tests that don't request `engine` never touch a database.
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -55,3 +56,17 @@ def engine(migrated_engine: Engine) -> Engine:
     with migrated_engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     return migrated_engine
+
+
+@pytest.fixture
+def mailpit() -> Iterator[str]:
+    """The Mailpit API URL, with its inbox emptied before the test."""
+    api = config.optional_setting("MAILPIT_API", "http://127.0.0.1:8025")
+    try:
+        httpx.delete(f"{api}/api/v1/messages", timeout=5).raise_for_status()
+    except httpx.HTTPError as exc:
+        pytest.fail(
+            f"Can't reach Mailpit at {api}. Start it with `docker compose up -d`.\n{exc}",
+            pytrace=False,
+        )
+    yield api
