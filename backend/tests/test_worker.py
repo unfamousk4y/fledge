@@ -259,7 +259,8 @@ def test_status_lists_every_company(engine: Engine) -> None:
     with engine.connect() as conn:
         lines = status_lines(conn, T0)
         open_count = conn.scalar(select(func.count()).select_from(db.postings))
-    assert len(lines) == 3  # header + 2 companies
+    assert len(lines) == 4  # header + 2 companies + email counts
+    assert lines[3] == "emails: 0 pending, 0 sent, 0 failed"
     assert lines[1].startswith("Acme") and "5m" in lines[1] and "ok" in lines[1]
     assert lines[2].startswith("Slow") and "30m" in lines[2]
     assert open_count == 2

@@ -146,6 +146,59 @@ crawl_runs = Table(
 )
 
 
+# --- Email alerts (migration 0003) --------------------------------------------
+
+subscribers = Table(
+    "subscribers",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("email", Text, nullable=False),
+    # Filters (DECISIONS.md 2026-11-24). all_companies=false means "only the
+    # boards listed in subscriber_boards".
+    Column("all_companies", Boolean, nullable=False, server_default=true()),
+    Column("hide_advanced_degrees", Boolean, nullable=False, server_default=true()),
+    Column("include_unclear_location", Boolean, nullable=False, server_default=true()),
+    _tz("last_emailed_at"),  # for burst grouping
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("email"),
+    CheckConstraint("email = lower(email)", name="email_lowercase"),
+)
+
+# A subscriber's chosen companies. Also a "watch": watched boards are checked
+# every 5 minutes.
+subscriber_boards = Table(
+    "subscriber_boards",
+    metadata,
+    Column(
+        "subscriber_id",
+        ForeignKey("subscribers.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("board_id", ForeignKey("boards.id", ondelete="CASCADE"), primary_key=True),
+)
+
+OUTBOX_STATUSES = ("pending", "sent", "failed")
+
+# One row per (subscriber, posting) alert. Written in the same transaction as
+# the check that found the posting; the sender loop delivers and marks them.
+outbox = Table(
+    "outbox",
+    metadata,
+    Column("id", BigInteger, Identity(), primary_key=True),
+    Column("subscriber_id", ForeignKey("subscribers.id", ondelete="CASCADE"), nullable=False),
+    Column("posting_id", ForeignKey("postings.id", ondelete="CASCADE"), nullable=False),
+    _tz("created_at", nullable=False),
+    Column("status", Text, nullable=False),
+    Column("attempts", Integer, nullable=False, server_default=text("0")),
+    _tz("next_attempt_at", nullable=False),
+    _tz("sent_at"),
+    Column("last_error", Text),
+    UniqueConstraint("subscriber_id", "posting_id"),  # never queue the same alert twice
+    CheckConstraint(_one_of("status", OUTBOX_STATUSES), name="status_valid"),
+    CheckConstraint("(status = 'sent') = (sent_at IS NOT NULL)", name="sent_at"),
+    Index(None, "status", "next_attempt_at"),  # "what's due to send?"
+)
+
 # --- Single-worker lock --------------------------------------------------------
 
 # Any fixed number works; it just has to be the same in every Fledge process.

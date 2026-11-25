@@ -27,8 +27,15 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Fake mail server: the email tests send real SMTP to it and read it back.
+      mailpit:
+        image: axllent/mailpit:v1.33.1
+        ports:
+          - 1025:1025
+          - 8025:8025
     env:
       TEST_DATABASE_URL: postgresql+psycopg://fledge:ci-only@localhost:5432/fledge_test
+      MAILPIT_API: http://localhost:8025
     defaults:
       run:
         working-directory: backend

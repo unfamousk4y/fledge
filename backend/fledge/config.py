@@ -29,8 +29,16 @@ def _read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def optional_setting(name: str, default: str = "") -> str:
+    """A setting that may be blank (e.g. no SMTP username for the local Mailpit)."""
+    value = os.environ.get(name)
+    if value is None:
+        value = _read_env_file(ENV_FILE).get(name)
+    return default if value is None else value
+
+
 def setting(name: str) -> str:
-    value = os.environ.get(name) or _read_env_file(ENV_FILE).get(name)
+    value = optional_setting(name)
     if not value:
         raise MissingSettingError(
             f"{name} is not set. Copy .env.example to .env (repo root) or set it in your shell."
