@@ -90,7 +90,7 @@ _EXCLUDED = _words(
     r"finance",
     r"accounting",
     r"legal",
-    r"people operations",
+    r"people",  # HR teams: "People Operations", "People Transformation", ...
     r"hr",
     r"customer success",
 )

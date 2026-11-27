@@ -43,6 +43,20 @@ class SmtpMailer:
                 except smtplib.SMTPAuthenticationError as exc:
                     # Don't include the server's reply text: it can echo the username.
                     raise MailerAuthError(f"SMTP login rejected (code {exc.smtp_code})") from None
+                except smtplib.SMTPServerDisconnected:
+                    # Gmail sometimes hangs up instead of answering "rejected"
+                    # (seen 2026-11-26 with a normal password instead of an app
+                    # password). Retrying for a day wouldn't fix it, so treat it
+                    # as a login failure and stop with a useful hint.
+                    raise MailerAuthError(
+                        "the mail server hung up during login. For Gmail this usually "
+                        "means SMTP_PASSWORD is not an app password (16 letters)"
+                    ) from None
+                except smtplib.SMTPNotSupportedError:
+                    raise MailerAuthError(
+                        "this mail server doesn't accept logins. For the local Mailpit, "
+                        "leave SMTP_USERNAME and SMTP_PASSWORD blank"
+                    ) from None
             smtp.send_message(message)
 
 
