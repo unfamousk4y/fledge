@@ -51,6 +51,7 @@ NOT_EARLY_CAREER_TECH = [
     "Account Executive, Enterprise",
     "UX Designer, New Grad",
     "People Operations Intern",
+    "2027 - AI and People Transformation Intern, NYC",  # real-world trap (MongoDB, 2026-11-24)
 ]
 
 

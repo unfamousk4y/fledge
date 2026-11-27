@@ -93,7 +93,7 @@ Settled choices for Fledge and why we made them. Add a dated entry when a decisi
 - [ ] Before writing each crawler, check that ATS's job-board API terms.
 - [ ] Check the licenses of the GitHub internship lists before any backfill.
 - [x] Pick an email provider after checking current free-tier limits (2026-11-24: Gmail SMTP for beta, Resend/Brevo + domain at launch).
-- [ ] Create the dedicated Fledge Gmail account, turn on 2-Step Verification, create an app password and put it in `.env` (founder).
+- [x] Create the dedicated Fledge Gmail account, turn on 2-Step Verification, create an app password and put it in `.env` (founder; first real alert delivered to the inbox 2026-11-26). Still to check: delivery to a different address.
 - [ ] **Launch blocker:** one-click unsubscribe link in every email (needs the web API).
 - [ ] Create the Oracle Cloud account (founder; needs a card for identity verification).
 - [ ] Domain decision at launch prep.

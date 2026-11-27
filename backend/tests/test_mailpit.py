@@ -8,12 +8,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+import pytest
 from sqlalchemy import Engine, update
 
 from fledge import config, db
 from fledge.alerts import Batch, Sender, build_message, sample_batch
 from fledge.companies import Company, sync_companies
-from fledge.mailer import SmtpMailer
+from fledge.mailer import MailerAuthError, SmtpMailer
 from fledge.subscribers import SubscriberInput, add_subscriber
 from fledge.worker import Worker
 
@@ -104,3 +105,12 @@ def test_new_posting_on_the_board_becomes_an_email(engine: Engine, mailpit: str)
     [message] = inbox(mailpit)
     assert message["Subject"] == "New: Data Engineer Intern at Acme"
     assert "Austin, TX" in message["Text"]
+
+
+def test_setting_a_username_for_mailpit_gives_a_clear_error(mailpit: str) -> None:
+    # Real server check: Mailpit doesn't accept logins, so a leftover username
+    # in .env must produce a clear message, not a vague failure.
+    with_login = SmtpMailer("127.0.0.1", 1025, "someone@example.com", "x", starttls=False)
+    with pytest.raises(MailerAuthError, match="leave SMTP_USERNAME"):
+        with_login.send(build_message(sample_batch("you@example.com", T0), "alerts@fledge.test"))
+    assert inbox(mailpit) == []
